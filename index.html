@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bilim Plus Auto Video Maker</title>
+<style>
+body{margin:0;padding:16px;background:#101522;color:#f5f7ff;font:16px system-ui}main{max-width:700px;margin:auto}section{background:#1b2334;padding:16px;border-radius:14px;margin:14px 0}label{display:block;margin:12px 0 6px;font-weight:bold}input,textarea,select{box-sizing:border-box;width:100%;padding:12px;border-radius:8px;background:#0e1421;color:white;border:1px solid #46516a;font:inherit}textarea{min-height:120px}button,.download{display:block;width:100%;padding:14px;border:0;border-radius:10px;background:#91a8ff;color:#101522;font-weight:bold;font-size:17px;margin-top:12px;text-align:center}small,p{color:#bac5d9;line-height:1.5}#status{white-space:pre-wrap;background:#0b101b;padding:12px;border-radius:8px}progress{width:100%}
+</style>
+</head>
+<body><main>
+<h1>🎬 Bilim Plus Auto Video Maker</h1>
+<p>MP3 + rasmlar + subtitrlar → MP4. Birinchi ishga tushishda internet kerak.</p>
+<section><h2>1. Ovoz va rasmlar</h2>
+<label>MP3 yoki WAV ovoz</label><input id="audio" type="file" accept="audio/*">
+<label>2–8 ta rasm, tartib bilan tanlang</label><input id="imgs" type="file" accept="image/*" multiple>
+<label>Har bir rasm davomiyligi (soniya)</label><input id="secs" type="number" min="2" max="15" value="5">
+<label>Video sifati</label><select id="size"><option value="854:480">480p — telefon uchun yengil</option><option value="1280:720">720p — HD</option></select>
+</section>
+<section><h2>2. Subtitrlar</h2><label>Har qatorni yangi satrdan yozing</label><textarea id="captions" placeholder="Oy birdan yo‘qoldi.&#10;Yerda nimalar o‘zgaradi?"></textarea><small>Subtitrlar taxminiy teng vaqt oralig‘ida chiqadi. Ovozdan avtomatik matn aniqlanmaydi.</small></section>
+<section><h2>3. MP4 yaratish</h2><button id="go">MP4 yaratish</button><progress id="prog" max="100" value="0" hidden></progress><p id="status">Fayllarni tanlang.</p><a id="dl" class="download" hidden>MP4 yuklab olish</a><a id="srt" class="download" hidden>SRT subtitrni yuklab olish</a></section>
+</main>
+<script type="module">
+import {FFmpeg} from 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js';
+import {toBlobURL} from 'https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js';
+const $=id=>document.getElementById(id),ff=new FFmpeg();let loaded=false,busy=false;
+function say(t){$('status').textContent=t}
+ff.on('progress',({progress})=>{$('prog').hidden=false;$('prog').value=Math.round(progress*100)})
+
+async function boot(){
+  if(loaded)return;
+  say('Video dvigateli yuklanmoqda… Kuting.');
+  const base='https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+  const worker=await toBlobURL(
+    'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/worker.js',
+    'text/javascript'
+  );
+  await ff.load({
+    classWorkerURL:worker,
+    coreURL:await toBlobURL(base+'/ffmpeg-core.js','text/javascript'),
+    wasmURL:await toBlobURL(base+'/ffmpeg-core.wasm','application/wasm')
+  });
+  loaded=true;
+}
+  
+function ts(t){let ms=Math.floor(t%1*1000),s=Math.floor(t)%60,m=Math.floor(t/60)%60,h=Math.floor(t/3600);return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')+','+String(ms).padStart(3,'0')}
+$('go').onclick=async()=>{if(busy)return;const a=$('audio').files[0],imgs=[...$('imgs').files],lines=$('captions').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),sec=Math.max(2,Math.min(15,+$('secs').value||5)),dims=$('size').value;if(!a||imgs.length<2||imgs.length>8||!lines.length){say('Ovoz, 2–8 ta rasm va subtitr matnini kiriting.');return}busy=true;$('go').disabled=true;$('dl').hidden=true;$('srt').hidden=true;try{await boot();const ext=(a.name.split('.').pop()||'mp3').toLowerCase().replace(/[^a-z0-9]/g,'');await ff.writeFile('voice.'+ext,new Uint8Array(await a.arrayBuffer()));const seg=[];for(let i=0;i<imgs.length;i++){const n='img'+i+'.jpg',o='seg'+i+'.mp4';say('Kadr '+(i+1)+'/'+imgs.length+' tayyorlanmoqda…');await ff.writeFile(n,new Uint8Array(await imgs[i].arrayBuffer()));const [w,h]=dims.split(':');await ff.exec(['-loop','1','-framerate','24','-i',n,'-t',String(sec),'-vf',`scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},zoompan=z='min(zoom+0.0005,1.04)':d=1:s=${w}x${h}:fps=24,format=yuv420p`,'-an','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p',o]);seg.push(o)}await ff.writeFile('list.txt',new TextEncoder().encode(seg.map(n=>"file '"+n+"'").join('\n')));say('Kadrlar birlashtirilmoqda…');await ff.exec(['-f','concat','-safe','0','-i','list.txt','-c','copy','slides.mp4']);const total=imgs.length*sec;let srt='';lines.forEach((line,i)=>{srt+=(i+1)+'\n'+ts(total*i/lines.length)+' --> '+ts(total*(i+1)/lines.length)+'\n'+line+'\n\n'});await ff.writeFile('captions.srt',new TextEncoder().encode(srt));say('Ovoz va subtitrlar birlashtirilmoqda…');let code=await ff.exec(['-i','slides.mp4','-i','voice.'+ext,'-vf',"subtitles=captions.srt:force_style='FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Alignment=2,MarginV=35'",'-map','0:v:0','-map','1:a:0','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-c:a','aac','-shortest','-movflags','+faststart','result.mp4']);if(code!==0){say('Subtitr bilan render ishlamadi; subtitrsiz sinayapman…');await ff.exec(['-i','slides.mp4','-i','voice.'+ext,'-map','0:v:0','-map','1:a:0','-c:v','libx264','-preset','ultrafast','-c:a','aac','-shortest','result.mp4'])}const data=await ff.readFile('result.mp4');$('dl').href=URL.createObjectURL(new Blob([data.buffer],{type:'video/mp4'}));$('dl').download='bilimplus-video.mp4';$('dl').hidden=false;$('srt').href=URL.createObjectURL(new Blob([srt],{type:'text/plain'}));$('srt').download='bilimplus-subtitles.srt';$('srt').hidden=false;$('prog').value=100;say('Tayyor! MP4 hajmi: '+(data.length/1048576).toFixed(1)+' MB. Yuklab olish tugmasini bosing.')}catch(e){say('Xatolik: '+(e.message||e)+'\nInternetni tekshiring. Avval 2 ta rasm va qisqa audio bilan sinang.')}finally{busy=false;$('go').disabled=false}};
+</script></body></html>
