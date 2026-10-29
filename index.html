@@ -25,8 +25,24 @@ import {FFmpeg} from 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js
 import {toBlobURL} from 'https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js';
 const $=id=>document.getElementById(id),ff=new FFmpeg();let loaded=false,busy=false;
 function say(t){$('status').textContent=t}
-ff.on('progress',({progress})=>{$('prog').hidden=false;$('prog').value=Math.round(progress*100)});
-async function boot(){if(loaded)return;say('Video dvigateli yuklanmoqda… Kuting.');const base='https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';const worker=await toBlobURL('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/worker.js','text/javascript');await ff.load({classWorkerURL:worker,coreURL:await toBlobURL(base+'/ffmpeg-core.js','text/javascript'),wasmURL:await toBlobURL(base+'/ffmpeg-core.wasm','application/wasm')});loaded=true}
+ff.on('progress',({progress})=>{$('prog').hidden=false;$('prog').value=Math.round(progress*100)})
+
+async function boot(){
+  if(loaded)return;
+  say('Video dvigateli yuklanmoqda… Kuting.');
+  const base='https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+  const worker=await toBlobURL(
+    'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/worker.js',
+    'text/javascript'
+  );
+  await ff.load({
+    classWorkerURL:worker,
+    coreURL:await toBlobURL(base+'/ffmpeg-core.js','text/javascript'),
+    wasmURL:await toBlobURL(base+'/ffmpeg-core.wasm','application/wasm')
+  });
+  loaded=true;
+}
+  
 function ts(t){let ms=Math.floor(t%1*1000),s=Math.floor(t)%60,m=Math.floor(t/60)%60,h=Math.floor(t/3600);return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')+','+String(ms).padStart(3,'0')}
 $('go').onclick=async()=>{if(busy)return;const a=$('audio').files[0],imgs=[...$('imgs').files],lines=$('captions').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean),sec=Math.max(2,Math.min(15,+$('secs').value||5)),dims=$('size').value;if(!a||imgs.length<2||imgs.length>8||!lines.length){say('Ovoz, 2–8 ta rasm va subtitr matnini kiriting.');return}busy=true;$('go').disabled=true;$('dl').hidden=true;$('srt').hidden=true;try{await boot();const ext=(a.name.split('.').pop()||'mp3').toLowerCase().replace(/[^a-z0-9]/g,'');await ff.writeFile('voice.'+ext,new Uint8Array(await a.arrayBuffer()));const seg=[];for(let i=0;i<imgs.length;i++){const n='img'+i+'.jpg',o='seg'+i+'.mp4';say('Kadr '+(i+1)+'/'+imgs.length+' tayyorlanmoqda…');await ff.writeFile(n,new Uint8Array(await imgs[i].arrayBuffer()));const [w,h]=dims.split(':');await ff.exec(['-loop','1','-framerate','24','-i',n,'-t',String(sec),'-vf',`scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},zoompan=z='min(zoom+0.0005,1.04)':d=1:s=${w}x${h}:fps=24,format=yuv420p`,'-an','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p',o]);seg.push(o)}await ff.writeFile('list.txt',new TextEncoder().encode(seg.map(n=>"file '"+n+"'").join('\n')));say('Kadrlar birlashtirilmoqda…');await ff.exec(['-f','concat','-safe','0','-i','list.txt','-c','copy','slides.mp4']);const total=imgs.length*sec;let srt='';lines.forEach((line,i)=>{srt+=(i+1)+'\n'+ts(total*i/lines.length)+' --> '+ts(total*(i+1)/lines.length)+'\n'+line+'\n\n'});await ff.writeFile('captions.srt',new TextEncoder().encode(srt));say('Ovoz va subtitrlar birlashtirilmoqda…');let code=await ff.exec(['-i','slides.mp4','-i','voice.'+ext,'-vf',"subtitles=captions.srt:force_style='FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Alignment=2,MarginV=35'",'-map','0:v:0','-map','1:a:0','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-c:a','aac','-shortest','-movflags','+faststart','result.mp4']);if(code!==0){say('Subtitr bilan render ishlamadi; subtitrsiz sinayapman…');await ff.exec(['-i','slides.mp4','-i','voice.'+ext,'-map','0:v:0','-map','1:a:0','-c:v','libx264','-preset','ultrafast','-c:a','aac','-shortest','result.mp4'])}const data=await ff.readFile('result.mp4');$('dl').href=URL.createObjectURL(new Blob([data.buffer],{type:'video/mp4'}));$('dl').download='bilimplus-video.mp4';$('dl').hidden=false;$('srt').href=URL.createObjectURL(new Blob([srt],{type:'text/plain'}));$('srt').download='bilimplus-subtitles.srt';$('srt').hidden=false;$('prog').value=100;say('Tayyor! MP4 hajmi: '+(data.length/1048576).toFixed(1)+' MB. Yuklab olish tugmasini bosing.')}catch(e){say('Xatolik: '+(e.message||e)+'\nInternetni tekshiring. Avval 2 ta rasm va qisqa audio bilan sinang.')}finally{busy=false;$('go').disabled=false}};
 </script></body></html>
